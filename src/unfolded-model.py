@@ -159,7 +159,7 @@ def createUnfoldedSurrogate(topology, reference_system, locality=5):
             if (atom1.index < atom2.index) and (abs(atom1.residue.index - atom2.residue.index) <= locality):
                 # Create exclusion.
                 try:
-                    [charge2, sigma2, epsilon2] = force.getParticleParameters(atom1.index)
+                    [charge2, sigma2, epsilon2] = force.getParticleParameters(atom2.index)
                     chargeprod = charge1 * charge2
                     sigma = 0.5 * (sigma1 + sigma2)
                     epsilon = unit.sqrt(epsilon1 * epsilon2)
