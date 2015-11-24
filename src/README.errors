@@ -1,0 +1,13 @@
+[LSKI1497:~/projects/construct-selection/src] choderaj% python zero-charges-issue.py
+Traceback (most recent call last):
+  File "zero-charges-issue.py", line 73, in <module>
+    simulation.step(niterations * nsteps)
+  File "/Users/choderaj/code/openmm-git/install/lib/python2.7/site-packages/simtk/openmm/app/simulation.py", line 127, in step
+    reporter.report(self, state)
+  File "/Users/choderaj/code/openmm-git/install/lib/python2.7/site-packages/simtk/openmm/app/pdbreporter.py", line 78, in report
+    PDBFile.writeModel(simulation.topology, state.getPositions(), self._out, self._nextModel)
+  File "/Users/choderaj/code/openmm-git/install/lib/python2.7/site-packages/simtk/openmm/app/pdbfile.py", line 290, in writeModel
+    (resIndex+1)%10000, _format_83(coords[0]),
+  File "/Users/choderaj/code/openmm-git/install/lib/python2.7/site-packages/simtk/openmm/app/pdbfile.py", line 323, in _format_83
+    'in a width-8 field' % f)
+ValueError: coordinate "-102276450.0" could not be represnted in a width-8 field
