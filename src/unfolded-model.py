@@ -43,8 +43,8 @@ import numpy
 import copy
 import time
 
-import simtk.openmm as openmm
-import simtk.unit as units
+from simtk import openmm, unit
+from simtk.openmm import app
 
 #=============================================================================================
 # Unfolded state model
@@ -54,7 +54,7 @@ def _findForces(system, force_name, first_only=False):
     """
     Extract the Force objects matching the requested name.
 
-    
+
     """
 
     # Build a dictionary of forces, assuming we only have one of each type.
@@ -99,10 +99,10 @@ def createConstruct(topology, reference_system, construct_residues):
     gb_force = _findForces(system, 'GBSAOBCForce', first_only=True)
     
     # Turn off charges and Lennard-Jones parameters for atoms outside of the construct.
-    zero_charge = 0.0 * units.elementary_charge
-    unit_sigma = 1.0 * units.angstroms
-    zero_radius = 0.0 * units.angstroms
-    zero_epsilon = 0.0 * units.kilocalories_per_mole
+    zero_charge = 0.0 * unit.elementary_charge
+    unit_sigma = 1.0 * unit.angstroms
+    zero_radius = 0.0 * unit.angstroms
+    zero_epsilon = 0.0 * unit.kilocalories_per_mole
     for atom in topology.atoms():
         if atom.residue.index not in construct_residues:
             nonbonded_force.setParticleParameters(atom.index, zero_charge, unit_sigma, zero_epsilon)
@@ -162,16 +162,16 @@ def createUnfoldedSurrogate(topology, reference_system, locality=5):
                     [charge2, sigma2, epsilon2] = force.getParticleParameters(atom1.index)
                     chargeprod = charge1 * charge2
                     sigma = 0.5 * (sigma1 + sigma2)
-                    epsilon = units.sqrt(epsilon1 * epsilon2)
+                    epsilon = unit.sqrt(epsilon1 * epsilon2)
                     force.addException(atom1.index, atom2.index, chargeprod, sigma, epsilon, False)
                 except:
                     # Exception already exists; don't modify it.
                     pass
 
     # Turn off standard particle interactions.
-    zero_charge = 0.0 * units.elementary_charge
-    unit_sigma = 1.0 * units.angstroms
-    zero_epsilon = 0.0 * units.kilocalories_per_mole
+    zero_charge = 0.0 * unit.elementary_charge
+    unit_sigma = 1.0 * unit.angstroms
+    zero_epsilon = 0.0 * unit.kilocalories_per_mole
     for atom in topology.atoms():
         force.setParticleParameters(atom.index, zero_charge, unit_sigma, zero_epsilon)
     
@@ -231,7 +231,7 @@ def createUnfoldedSurrogate2(topology, reference_system, locality=5):
                         [charge2, sigma2, epsilon2] = reference_force.getParticleParameters(atom1.index)
                         chargeprod = charge1 * charge2
                         sigma = 0.5 * (sigma1 + sigma2)
-                        epsilon = units.sqrt(epsilon1 * epsilon2)
+                        epsilon = unit.sqrt(epsilon1 * epsilon2)
                         custom_bond_force.addBond(atom1.index, atom2.index, [chargeprod, sigma, epsilon])
 
         elif isinstance(reference_force, openmm.GBSAOBCForce):
@@ -239,8 +239,8 @@ def createUnfoldedSurrogate2(topology, reference_system, locality=5):
             force = copy.deepcopy(reference_force)
             #system.addForce(force)
             
-            zero_charge = 0.0 * units.elementary_charge
-            unit_sigma = 1.0 * units.angstroms
+            zero_charge = 0.0 * unit.elementary_charge
+            unit_sigma = 1.0 * unit.angstroms
             for atom in topology.atoms():            
                 force.setParticleParameters(atom.index, zero_charge, unit_sigma, 0.0)                
         else:                
@@ -252,16 +252,16 @@ def createUnfoldedSurrogate2(topology, reference_system, locality=5):
     return system
 
 def benchmark(system, positions, nsteps=500):
-    timestep = 2.0 * units.femtoseconds
-    collision_rate = 90.0 / units.picoseconds
-    temperature = 298.0 * units.kelvin
+    timestep = 2.0 * unit.femtoseconds
+    collision_rate = 90.0 / unit.picoseconds
+    temperature = 298.0 * unit.kelvin
     integrator = openmm.LangevinIntegrator(temperature, collision_rate, timestep)
     context = openmm.Context(system, integrator)
     context.setPositions(positions)
     state = context.getState(getEnergy=True)
     print state.getPotentialEnergy()
     print "Minimizing..."
-    tolerance = 1.0 * units.kilocalories_per_mole / units.angstrom
+    tolerance = 1.0 * unit.kilocalories_per_mole / unit.angstrom
     maxIterations = 500
     openmm.LocalEnergyMinimizer.minimize(context, tolerance, maxIterations)
     print "Simulating..."
@@ -271,16 +271,16 @@ def benchmark(system, positions, nsteps=500):
     final_time = time.time()
     elapsed_time = final_time - initial_time
     print state.getPotentialEnergy()
-    print "%d steps took %.3f s (%.3f ns/day)" % (nsteps, elapsed_time, nsteps * (timestep/units.nanoseconds) / elapsed_time * 24*60*60)
+    print "%d steps took %.3f s (%.3f ns/day)" % (nsteps, elapsed_time, nsteps * (timestep/unit.nanoseconds) / elapsed_time * 24*60*60)
     del context, integrator, state
     return
 
 def simulate(topology, system, positions, output_filename):
     import simtk.openmm.app as app
 
-    timestep = 2.0 * units.femtoseconds
-    collision_rate = 20.0 / units.picoseconds
-    temperature = 298.0 * units.kelvin
+    timestep = 2.0 * unit.femtoseconds
+    collision_rate = 20.0 / unit.picoseconds
+    temperature = 298.0 * unit.kelvin
     integrator = openmm.LangevinIntegrator(temperature, collision_rate, timestep)
 
     niterations = 1000
