@@ -222,39 +222,37 @@ def createUnfoldedSurrogate(topology, reference_system, locality=5):
     return system
 
 def createUnfoldedSurrogate2(topology, reference_system, locality=5):
-
-    # Create new deep copy reference system to modify.
-    system = openmm.System()
-
-    # Set periodic box vectors.
-    [a,b,c] = reference_system.getDefaultPeriodicBoxVectors()
-    system.setDefaultPeriodicBoxVectors(a,b,c)
-
-    # Add atoms.
-    for atom_index in range(reference_system.getNumParticles()):
-        mass = reference_system.getParticleMass(atom_index)
-        system.addParticle(mass)
-
-    # Add constraints
-    for constraint_index in range(reference_system.getNumConstraints()):
-        [iatom, jatom, r0] = reference_system.getConstraintParameters(constraint_index)
-        system.addConstraint(iatom, jatom, r0)
+    # Create system deep copy.
+    system = copy.deepcopy(reference_system)
 
     # Modify forces as appropriate, copying other forces without modification.
+    forces_to_remove = list()
     nforces = reference_system.getNumForces()
     for force_index in range(nforces):
         reference_force = reference_system.getForce(force_index)
+        force_name = reference_force.__class__.__name__
+        print force_name
 
-        if isinstance(reference_force, openmm.NonbondedForce):
+        if force_name == 'NonbondedForce':
+            forces_to_remove.append(force_index)
+
             # Create CustomBondForce instead.
-            energy_expression = "4*epsilon*((sigma/r)^12 - (sigma/r)^6) + 138.935456*chargeprod/r;" # TODO: Check coulomb constant
+            energy_expression = "E_LJ + E_Coulomb + E_GB;"
+            energy_expression += "E_LJ = 4*epsilon*((sigma/r)^12 - (sigma/r)^6);"
+            energy_expression += "E_Coulomb = 138.935456*chargeprod/r;"
+            energy_expression += "E_GB = -0.5*(1/epsilon_solute - 1/epsilon_solvent)*chargeprod/f_GB;"
+            energy_expression += "f_GB = (r^2 + RiRj*exp(-r/(4*RiRj)))^0.5;"
+            energy_expression += "RiRj = 0.25;"
             custom_bond_force = openmm.CustomBondForce(energy_expression)
             custom_bond_force.addPerBondParameter("chargeprod") # charge product
             custom_bond_force.addPerBondParameter("sigma") # Lennard-Jones sigma
             custom_bond_force.addPerBondParameter("epsilon") # Lennard-Jones epsilon
-            #system.addForce(custom_bond_force)
+            custom_bond_force.addGlobalParameter("epsilon_solvent", 78.5)
+            custom_bond_force.addGlobalParameter("epsilon_solute", 1)
+            system.addForce(custom_bond_force)
 
             # Add exclusions.
+            print("Building exclusions...")
             from sets import Set
             exceptions = Set()
             for index in range(reference_force.getNumExceptions()):
@@ -267,6 +265,7 @@ def createUnfoldedSurrogate2(topology, reference_system, locality=5):
                     exceptions.add( (atom1_index, atom2_index) )
 
             # Add local interactions.
+            print("Adding local interactions...")
             for atom1 in topology.atoms():
                 [charge1, sigma1, epsilon1] = reference_force.getParticleParameters(atom1.index)
                 for atom2 in topology.atoms():
@@ -277,20 +276,87 @@ def createUnfoldedSurrogate2(topology, reference_system, locality=5):
                         epsilon = unit.sqrt(epsilon1 * epsilon2)
                         custom_bond_force.addBond(atom1.index, atom2.index, [chargeprod, sigma, epsilon])
 
-        elif isinstance(reference_force, openmm.GBSAOBCForce):
-            # Copy force without modification.
-            force = copy.deepcopy(reference_force)
-            #system.addForce(force)
+            print("%d custom bond terms added." % custom_bond_force.getNumBonds())
 
-            zero_charge = 0.0 * unit.elementary_charge
-            unit_sigma = 1.0 * unit.angstroms
+        elif force_name == 'GBSAOBCForce':
+            forces_to_remove.append(force_index)
+
+    # Remove forces scheduled for removal.
+    print("Removing forces:")
+    print(forces_to_remove)
+    for force_index in forces_to_remove[::-1]:
+        system.removeForce(force_index)
+
+    return system
+
+def createUnfoldedSurrogate3(topology, reference_system, locality=5, cutoff=6.0*unit.angstrom, switch_width=1.0*unit.angstrom):
+    # Create system deep copy.
+    system = copy.deepcopy(reference_system)
+
+    # Modify forces as appropriate, copying other forces without modification.
+    forces_to_remove = list()
+    nforces = reference_system.getNumForces()
+    for force_index in range(nforces):
+        reference_force = reference_system.getForce(force_index)
+        force_name = reference_force.__class__.__name__
+        print force_name
+
+        if force_name == 'NonbondedForce':
+            forces_to_remove.append(force_index)
+
+            # Create CustomNonbondedForce instead.
+            energy_expression = "islocal * (E_LJ + E_Coulomb);"
+            energy_expression += "E_LJ = 4*epsilon*((sigma/r)^12 - (sigma/r)^6);"
+            energy_expression += "E_Coulomb = 138.935456*chargeprod/r;"
+            energy_expression += "islocal = step(locality - abs(resid1 - resid2) + 0.001);"
+            custom_force = openmm.CustomNonbondedForce(energy_expression)
+            custom_force.setNonbondedMethod(reference_force.getNonbondedMethod()) # TODO: Fix me
+            custom_force.setCutoffDistance(reference_force.getCutoffDistance())
+            custom_force.setSwitchingDistance(reference_force.getSwitchingDistance())
+            custom_force.setUseSwitchingFunction(reference_force.getUseSwitchingFunction())
+            custom_force.addGlobalParameter("locality", locality)
+            custom_force.addPerParticleParameter("charge") # charge product
+            custom_force.addPerParticleParameter("sigma") # Lennard-Jones sigma
+            custom_force.addPerParticleParameter("epsilon") # Lennard-Jones epsilon
+            custom_force.addPerParticleParameter("resid") # residue index
+            system.addForce(custom_force)
+
+            custom_force.setCutoffDistance(cutoff)
+            custom_force.setNonbondedMethod(custom_force.CutoffNonPeriodic)
+            custom_force.setUseSwitchingFunction(True)
+            custom_force.setSwitchingDistance(custom_force.getCutoffDistance() - switch_width)
+
+            # Create CustomBondForce
+            energy_expression = "E_LJ + E_Coulomb;"
+            energy_expression += "E_LJ = 4*epsilon*((sigma/r)^12 - (sigma/r)^6);"
+            energy_expression += "E_Coulomb = 138.935456*chargeprod/r;"
+            custom_bond_force = openmm.CustomBondForce(energy_expression)
+            custom_bond_force.addPerBondParameter("chargeprod") # charge product
+            custom_bond_force.addPerBondParameter("sigma") # Lennard-Jones sigma
+            custom_bond_force.addPerBondParameter("epsilon") # Lennard-Jones epsilon
+            system.addForce(custom_bond_force)
+
+            # Add exceptions
+            for index in range(reference_force.getNumExceptions()):
+                [atom1_index, atom2_index, chargeprod, sigma, epsilon] = reference_force.getExceptionParameters(index)
+                custom_force.addExclusion(atom1_index, atom2_index)
+                custom_bond_force.addBond(atom1_index, atom2_index, [chargeprod, sigma, epsilon])
+
+            # Add terms.
             for atom in topology.atoms():
-                force.setParticleParameters(atom.index, zero_charge, unit_sigma, 0.0)
-        else:
+                [charge, sigma, epsilon] = reference_force.getParticleParameters(atom.index)
+                custom_force.addParticle([charge, sigma, epsilon, atom.residue.index])
 
-            # Copy force without modification.
-            force = copy.deepcopy(reference_force)
-            system.addForce(force)
+        elif force_name == 'GBSAOBCForce':
+            #forces_to_remove.append(force_index)
+            reference_force.setNonbondedMethod(reference_force.CutoffNonPeriodic)
+            reference_force.setCutoffDistance(cutoff)
+
+    # Remove forces scheduled for removal.
+    print("Removing forces:")
+    print(forces_to_remove)
+    for force_index in forces_to_remove[::-1]:
+        system.removeForce(force_index)
 
     return system
 
@@ -414,11 +480,11 @@ if __name__ == "__main__":
     forcefield = app.ForceField('amber96.xml', 'amber96_obc.xml')
     print "Parameterizing protein..."
     reference_system = forcefield.createSystem(pdb.topology, constraints=True)
-    print "Replacing GBSAOBCForce with CustomGBForce to allow exclusions to be added..."
-    replaceGBSAOBCForce(reference_system)
+    #print "Replacing GBSAOBCForce with CustomGBForce to allow exclusions to be added..."
+    #replaceGBSAOBCForce(reference_system)
 
     print "Creating unfolded surrogate..."
-    system = createUnfoldedSurrogate(pdb.topology, reference_system, locality=5)
+    system = createUnfoldedSurrogate2(pdb.topology, reference_system, locality=5)
     #system = createUnfoldedSurrogateCutoff(pdb.topology, system)
 
     #print "Benchmarking unfolded surrogate..."
